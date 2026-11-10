@@ -1,0 +1,53 @@
+name: Compilar LimpaTudo (Windows)
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar
+        run: cmake -S . -B build -A x64
+
+      - name: Compilar
+        run: cmake --build build --config Release --target LimpaTudo_VST3 --parallel
+
+      - name: Instalar o Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Gerar o instalador (.exe)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $vst3 = (Resolve-Path "build/LimpaTudo_artefacts/Release/VST3/LimpaTudo.vst3").Path
+          & $iscc "/DVst3Dir=$vst3" "/DAppVersion=1.0.0" "installer/LimpaTudo.iss"
+          if (-not (Test-Path "installer/output/LimpaTudo-Setup.exe")) { throw "Instalador não foi gerado" }
+
+      # Baixe pela aba Actions -> execução -> "LimpaTudo-Setup" (vem dentro de um .zip do GitHub; extraia e clique no .exe)
+      - name: Guardar o instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: LimpaTudo-Setup
+          path: installer/output/LimpaTudo-Setup.exe
+
+      # Em toda push na branch principal, publica/atualiza a Release "latest" com o .exe direto (sem .zip)
+      - name: Publicar Release (.exe direto)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --repo ${{ github.repository }} --yes --cleanup-tag 2>&1 | Out-Null
+          $global:LASTEXITCODE = 0
+          gh release create latest installer/output/LimpaTudo-Setup.exe `
+            --repo ${{ github.repository }} `
+            --title "LimpaTudo (instalador)" `
+            --notes "Baixe **LimpaTudo-Setup.exe**, dê dois cliques e siga o assistente. O plugin é instalado em C:\Program Files\Common Files\VST3." `
+            --latest
